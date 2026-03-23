@@ -1,0 +1,216 @@
+use colored::Colorize;
+use image::GenericImage;
+use wavefront::Obj;
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+
+    // extract arguments
+    let obj_file = args.get(1)
+        .expect("Please provide the path to the .obj file");
+
+    let texture_file = args.get(2)
+        .expect("Please provide the path to the texture file");
+
+    let marker_value = args.get(3)
+        .expect("Please provide the marker value (0-255)")
+        .parse::<u8>()
+        .expect("Marker value must be an integer between 0 and 255");
+
+    // read .obj file
+    println!("{}", "Loading .obj file...".bold());
+    let obj = Obj::from_file(obj_file)
+        .expect("Failed to load .obj file");
+
+    // read texture file
+    println!("{}", "Reading texture file...".bold());
+    let texture = image::open(texture_file)
+        .expect("Failed to load texture file");
+
+    let texture_width = texture.width();
+    let texture_height = texture.height();
+
+    println!("{}", "Model information:".bold());
+
+    // calculate output image dimensions
+    let num_triangles = obj.triangles().count() as u32;
+    let uv_height = num_triangles.div_ceil(texture_width);
+    println!(" ・ # faces: {}", num_triangles.to_string().cyan().bold());
+
+    let num_positions = obj.positions().len() as u32;
+    let vp_height = (num_positions * 3).div_ceil(texture_width);
+    println!(" ・ # vertices: {}", num_positions.to_string().cyan().bold());
+
+    let num_uvs = obj.uvs().len() as u32;
+    let vt_height = (num_uvs * 2).div_ceil(texture_width);
+    println!(" ・ # uv coordinates: {}", num_uvs.to_string().cyan().bold());
+
+    let num_normals = obj.normals().len() as u32;
+    let vn_height = (num_normals * 3).div_ceil(texture_width);
+    println!(" ・ # vertex normals: {}", num_normals.to_string().cyan().bold());
+
+    let num_vertices = obj.vertices().len() as u32;
+    let v_height = (num_vertices * 3).div_ceil(texture_width);
+    println!(" ・ # vertex indices: {}", num_vertices.to_string().cyan().bold());
+
+    let output_height = 1 + uv_height + texture_height + vp_height + vt_height + vn_height + v_height;
+
+    if output_height > 4096 && texture_width < 4096 || output_height > 8 * texture_width {
+        println!("output height ({output_height}) may be too high, consider increasing width of input texture.");
+    }
+
+    println!("{}", "\nGenerating output image...".bold());
+
+    // create output image
+    let mut output_image = image::DynamicImage::new(
+        texture_width, output_height, image::ColorType::Rgba8);
+
+    // marker
+    output_image.put_pixel(0, 0, image::Rgba([
+        12, 34, 56, marker_value]));
+
+    // texture size
+    output_image.put_pixel(1, 0, image::Rgba([
+        (texture_width >> 8) as u8,
+        (texture_width & 0xFF) as u8,
+        (texture_height >> 8) as u8,
+        (texture_height & 0xFF) as u8]));
+
+    // number of vertices
+    output_image.put_pixel(2, 0, image::Rgba([
+        (num_vertices >> 24) as u8,
+        (num_vertices >> 16) as u8,
+        (num_vertices >> 8) as u8,
+        (num_vertices & 0xFF) as u8]));
+
+    // data heights
+    output_image.put_pixel(3, 0, image::Rgba([
+        ((vp_height >> 8) & 0xFF) as u8,
+        (vp_height & 0xFF) as u8,
+        ((vt_height >> 8) & 0xFF) as u8,
+        (vt_height & 0xFF) as u8]));
+    output_image.put_pixel(4, 0, image::Rgba([
+        ((vn_height >> 8) & 0xFF) as u8,
+        (vn_height & 0xFF) as u8,
+        ((v_height >> 8) & 0xFF) as u8,
+        (v_height & 0xFF) as u8]));
+
+    // texture
+    output_image.copy_from(&texture, 0, 1 + uv_height)
+        .expect("Failed to copy texture to output image");
+
+    // generate json model definition
+    let mut model_definition = serde_json::json!({
+        "textures": {"0": "output.png"},
+        "elements": [],
+        "display": {
+            "thirdperson_righthand": {"rotation": [85, 0, 0]},
+            "thirdperson_lefthand": {"rotation": [85, 0, 0]},
+        }
+    });
+
+    let elements = model_definition
+        .as_object_mut().unwrap()
+        .get_mut("elements").unwrap()
+        .as_array_mut().unwrap();
+
+    for i in 0..num_triangles {
+        elements.push(serde_json::json!({
+            "from": [8, 0, 8],
+            "to": [24, 16, 8],
+            "faces": {
+                "north": {
+                    "uv": get_header(&mut output_image, i, texture_width, output_height),
+                    "texture": "#0",
+                    "tintindex": 0,
+                }
+            },
+        }));
+    }
+
+    // save model definition
+    std::fs::write("model.json", serde_json::to_string(&model_definition).unwrap())
+        .expect("Failed to save model definition");
+
+    // vertex positions
+    let y = 1 + uv_height + texture_height;
+    for (i, &value) in obj.positions().iter().flatten().enumerate() {
+        let encoded = 8388608.0 + value * 65536.0;
+        write_float(&mut output_image, i as u32, y, texture_width, encoded);
+    }
+
+    // uv coordinates
+    let y = 1 + uv_height + texture_height + vp_height;
+    for (i, &value) in obj.uvs().iter().flatten().enumerate() {
+        let encoded = value * 65536.0;
+        write_float(&mut output_image, i as u32, y, texture_width, encoded);
+    }
+
+    // vertex normals
+    let y = 1 + uv_height + texture_height + vp_height + vt_height;
+    for (i, &value) in obj.normals().iter().flatten().enumerate() {
+        let encoded = 8388608.0 + value * 65536.0;
+        write_float(&mut output_image, i as u32, y, texture_width, encoded);
+    }
+
+    // vertex indices
+    let y = 1 + uv_height + texture_height + vp_height + vt_height + vn_height;
+    for (i, value) in obj.vertices().flat_map(flatten_vertex).enumerate() {
+        write_int(&mut output_image, i as u32, y, texture_width, value);
+    }
+
+    // save output image
+    output_image.save("output.png")
+        .expect("Failed to save output image");
+
+    println!("\n{} {}", "Done!".bold().green(), "Output saved as output.png and model.json".italic());
+}
+
+#[inline]
+fn write_int(image: &mut image::DynamicImage, index: u32, offset: u32, texture_width: u32, value: u32) {
+    let x = index % texture_width;
+    let y = offset + index / texture_width;
+
+    image.put_pixel(x, y, image::Rgba([
+        ((value >> 16) & 0xFF) as u8,
+        ((value >> 8) & 0xFF) as u8,
+        (value & 0xFF) as u8,
+        255]));
+}
+
+#[inline]
+fn write_float(image: &mut image::DynamicImage, index: u32, offset: u32, texture_width: u32, value: f32) {
+    let x = index % texture_width;
+    let y = offset + index / texture_width;
+
+    image.put_pixel(x, y, image::Rgba([
+        ((value / 65536.0) % 256.0) as u8,
+        ((value / 256.0) % 256.0) as u8,
+        (value % 256.0) as u8,
+        255]));
+}
+
+fn flatten_vertex(vertex: wavefront::Vertex) -> [u32; 3] {
+    [
+        vertex.position_index() as u32,
+        vertex.uv_index().unwrap_or(0) as u32,
+        vertex.normal_index().unwrap_or(0) as u32,
+    ]
+}
+
+fn get_header(image: &mut image::DynamicImage, index: u32, texture_width: u32, output_height: u32) -> [f32; 4] {
+    let x = index % texture_width;
+    let y = 1 + index / texture_width;
+
+    image.put_pixel(x, y, image::Rgba([
+        ((x >> 8) & 0xFF) as u8,
+        (x & 0xFF) as u8,
+        ((y >> 8) & 0xFF) as u8,
+        (y & 0xFF) as u8]));
+    [
+        (x as f32 + 0.1) * 16.0 / texture_width as f32,
+        (y as f32 + 0.1) * 16.0 / output_height as f32,
+        (x as f32 + 0.9) * 16.0 / texture_width as f32,
+        (y as f32 + 0.9) * 16.0 / output_height as f32,
+    ]
+}
