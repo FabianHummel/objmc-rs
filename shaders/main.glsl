@@ -3,11 +3,11 @@
 flat out int isObjmcModel;
 flat out ivec4 objmcMarker;
 
-bool isObjmcMarker() {
+bool is_objmc_marker() {
     return objmcMarker.rgb == ivec3(12, 34, 56);
 }
 
-ivec4 getmeta(ivec2 topleft, int offset) {
+ivec4 get_meta(ivec2 topleft, int offset) {
     return ivec4(texelFetch(Sampler0, topleft + ivec2(offset, 0), 0) * 255);
 }
 
