@@ -50,10 +50,10 @@ fn main() {
     println!(" ・ # vertex normals: {}", num_normals.to_string().cyan().bold());
 
     let num_vertices = obj.vertices().len() as u32;
-    let v_height = (num_vertices * 3).div_ceil(texture_width);
+    let vc_height = (num_vertices * 3).div_ceil(texture_width);
     println!(" ・ # vertex indices: {}", num_vertices.to_string().cyan().bold());
 
-    let output_height = 1 + uv_height + texture_height + vp_height + vt_height + vn_height + v_height;
+    let output_height = 1 + uv_height + texture_height + vp_height + vt_height + vn_height + vc_height;
 
     if output_height > 4096 && texture_width < 4096 || output_height > 8 * texture_width {
         println!("output height ({output_height}) may be too high, consider increasing width of input texture.");
@@ -92,8 +92,8 @@ fn main() {
     output_image.put_pixel(4, 0, image::Rgba([
         ((vn_height >> 8) & 0xFF) as u8,
         (vn_height & 0xFF) as u8,
-        ((v_height >> 8) & 0xFF) as u8,
-        (v_height & 0xFF) as u8]));
+        ((uv_height >> 8) & 0xFF) as u8,
+        (uv_height & 0xFF) as u8]));
 
     // texture
     output_image.copy_from(&texture, 0, 1 + uv_height)
