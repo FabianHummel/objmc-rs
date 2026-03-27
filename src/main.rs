@@ -41,9 +41,14 @@ fn main() {
     println!("{}", "Model information:".bold());
 
     // calculate output image dimensions
+
     let num_triangles = obj.triangles().count() as u32;
     let uv_height = num_triangles.div_ceil(texture_width);
     println!(" ・ # faces: {}", num_triangles.to_string().cyan().bold());
+
+    let num_vertices = obj.vertices().len() as u32;
+    let vc_height = (num_vertices * 3).div_ceil(texture_width);
+    println!(" ・ # vertex indices: {}", num_vertices.to_string().cyan().bold());
 
     let num_positions = obj.positions().len() as u32;
     let vp_height = (num_positions * 3).div_ceil(texture_width);
@@ -57,11 +62,7 @@ fn main() {
     let vn_height = (num_normals * 3).div_ceil(texture_width);
     println!(" ・ # vertex normals: {}", num_normals.to_string().cyan().bold());
 
-    let num_vertices = obj.vertices().len() as u32;
-    let vc_height = (num_vertices * 3).div_ceil(texture_width);
-    println!(" ・ # vertex indices: {}", num_vertices.to_string().cyan().bold());
-
-    let output_height = 1 + uv_height + texture_height + vp_height + vt_height + vn_height + vc_height;
+    let output_height = 1 + uv_height + texture_height + vc_height + vp_height + vt_height + vn_height;
 
     if output_height > 4096 && texture_width < 4096 || output_height > 8 * texture_width {
         println!("output height ({output_height}) may be too high, consider increasing width of input texture.");
@@ -86,15 +87,15 @@ fn main() {
 
     // data heights
     output_image.put_pixel(2, 0, image::Rgba([
+        ((uv_height >> 8) & 0xFF) as u8,
+        (uv_height & 0xFF) as u8,
+        ((vc_height >> 8) & 0xFF) as u8,
+        (vc_height & 0xFF) as u8]));
+    output_image.put_pixel(3, 0, image::Rgba([
         ((vp_height >> 8) & 0xFF) as u8,
         (vp_height & 0xFF) as u8,
         ((vt_height >> 8) & 0xFF) as u8,
         (vt_height & 0xFF) as u8]));
-    output_image.put_pixel(3, 0, image::Rgba([
-        ((vn_height >> 8) & 0xFF) as u8,
-        (vn_height & 0xFF) as u8,
-        ((uv_height >> 8) & 0xFF) as u8,
-        (uv_height & 0xFF) as u8]));
 
     // texture
     output_image.copy_from(&texture, 0, 1 + uv_height)
@@ -112,31 +113,33 @@ fn main() {
     std::fs::write(&output_model_file, serde_json::to_string(&model_definition).unwrap())
         .expect("Failed to save model definition");
 
-    // vertex positions
-    let y = 1 + uv_height + texture_height;
-    for (i, &value) in obj.positions().iter().flatten().enumerate() {
-        let encoded = 8388608.0 + value * 65536.0;
-        write_float(&mut output_image, i as u32, y, texture_width, encoded);
-    }
-
-    // uv coordinates
-    let y = 1 + uv_height + texture_height + vp_height;
-    for (i, &value) in obj.uvs().iter().flatten().enumerate() {
-        let encoded = value * 65536.0;
-        write_float(&mut output_image, i as u32, y, texture_width, encoded);
-    }
-
-    // vertex normals
-    let y = 1 + uv_height + texture_height + vp_height + vt_height;
-    for (i, &value) in obj.normals().iter().flatten().enumerate() {
-        let encoded = 8388608.0 + value * 65536.0;
-        write_float(&mut output_image, i as u32, y, texture_width, encoded);
-    }
+    let mut y_offset = 1 + uv_height + texture_height;
 
     // vertex indices
-    let y = 1 + uv_height + texture_height + vp_height + vt_height + vn_height;
     for (i, value) in obj.vertices().flat_map(flatten_vertex).enumerate() {
-        write_int(&mut output_image, i as u32, y, texture_width, value);
+        write_int(&mut output_image, i as u32, y_offset, texture_width, value);
+    }
+    y_offset += vc_height;
+
+    // vertex positions
+
+    for (i, &value) in obj.positions().iter().flatten().enumerate() {
+        let encoded = 8388608.0 + value * 65536.0;
+        write_float(&mut output_image, i as u32, y_offset, texture_width, encoded);
+    }
+    y_offset += vp_height;
+
+    // uv coordinates
+    for (i, &value) in obj.uvs().iter().flatten().enumerate() {
+        let encoded = value * 65536.0;
+        write_float(&mut output_image, i as u32, y_offset, texture_width, encoded);
+    }
+    y_offset += vt_height;
+
+    // vertex normals
+    for (i, &value) in obj.normals().iter().flatten().enumerate() {
+        let encoded = 8388608.0 + value * 65536.0;
+        write_float(&mut output_image, i as u32, y_offset, texture_width, encoded);
     }
 
     // save output image

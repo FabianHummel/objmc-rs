@@ -30,10 +30,10 @@ void main()
         ivec2 texSize = ivec2(t[1].r << 8 + t[1].g, t[1].b << 8 + t[1].a);
 
         // data heights
-        int vph = t[2].r << 8 + t[2].g; // vertex positions
-        int vth = t[2].b << 8 + t[2].a; // vertex UVs
-        int vnh = t[3].r << 8 + t[3].g; // vertex normals
-        int uvh = t[3].b << 8 + t[3].a; // UV offsets (for calculating the topleft)
+        int uvh = t[2].r << 8 + t[2].g; // UV offsets (for calculating the topleft)
+        int vch = t[2].b << 8 + t[2].a; // vertex indices
+        int vph = t[3].r << 8 + t[3].g; // vertex positions
+        int vth = t[3].b << 8 + t[3].a; // vertex UVs
 
         //relative vertex id from unique face UV
         int corner = gl_VertexID % 4;
@@ -41,10 +41,10 @@ void main()
 
         //read data
         int y = 1 + uvh + texSize.y;
-        ivec3 index = get_vert(topLeft, texSize.x, y + vph + vth + vnh, id);
-        posOffset = get_vec3(topLeft, texSize.x, y, index.x);
-        texCoord = get_vec2(topLeft, texSize.x, y + vph, index.y);
-        vertexNormal = get_vec3(topLeft, texSize.x, y + vph + vth, index.z);
+        ivec3 index = get_vert(topLeft, texSize.x, y, id);
+        posOffset = get_vec3(topLeft, texSize.x, y + vch, index.x);
+        texCoord = get_vec2(topLeft, texSize.x, y + vch + vph, index.y);
+        vertexNormal = get_vec3(topLeft, texSize.x, y + vch + vph + vth, index.z);
 
         vec2 onePixel = 1. / atlasSize;
         //final UV (pos set manually)
