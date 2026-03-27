@@ -17,6 +17,14 @@ fn main() {
         .parse::<u8>()
         .expect("Marker value must be an integer between 0 and 255");
 
+    let output_texture_file = args.get(4)
+        .cloned()
+        .unwrap_or("output.png".to_string());
+
+    let output_model_file = args.get(5)
+        .cloned()
+        .unwrap_or("model.json".to_string());
+
     // read .obj file
     println!("{}", "Loading .obj file...".bold());
     let obj = Obj::from_file(obj_file)
@@ -76,20 +84,13 @@ fn main() {
         (texture_height >> 8) as u8,
         (texture_height & 0xFF) as u8]));
 
-    // number of vertices
-    output_image.put_pixel(2, 0, image::Rgba([
-        (num_vertices >> 24) as u8,
-        (num_vertices >> 16) as u8,
-        (num_vertices >> 8) as u8,
-        (num_vertices & 0xFF) as u8]));
-
     // data heights
-    output_image.put_pixel(3, 0, image::Rgba([
+    output_image.put_pixel(2, 0, image::Rgba([
         ((vp_height >> 8) & 0xFF) as u8,
         (vp_height & 0xFF) as u8,
         ((vt_height >> 8) & 0xFF) as u8,
         (vt_height & 0xFF) as u8]));
-    output_image.put_pixel(4, 0, image::Rgba([
+    output_image.put_pixel(3, 0, image::Rgba([
         ((vn_height >> 8) & 0xFF) as u8,
         (vn_height & 0xFF) as u8,
         ((uv_height >> 8) & 0xFF) as u8,
@@ -100,36 +101,15 @@ fn main() {
         .expect("Failed to copy texture to output image");
 
     // generate json model definition
-    let mut model_definition = serde_json::json!({
-        "textures": {"0": "output.png"},
-        "elements": [],
-        "display": {
-            "thirdperson_righthand": {"rotation": [85, 0, 0]},
-            "thirdperson_lefthand": {"rotation": [85, 0, 0]},
-        }
-    });
-
-    let elements = model_definition
-        .as_object_mut().unwrap()
-        .get_mut("elements").unwrap()
-        .as_array_mut().unwrap();
-
-    for i in 0..num_triangles {
-        elements.push(serde_json::json!({
-            "from": [8, 0, 8],
-            "to": [24, 16, 8],
-            "faces": {
-                "north": {
-                    "uv": get_header(&mut output_image, i, texture_width, output_height),
-                    "texture": "#0",
-                    "tintindex": 0,
-                }
-            },
-        }));
-    }
+    let model_definition = generate_model_definition(
+        &output_texture_file,
+        &mut output_image,
+        num_triangles,
+        texture_width,
+        output_height);
 
     // save model definition
-    std::fs::write("model.json", serde_json::to_string(&model_definition).unwrap())
+    std::fs::write(&output_model_file, serde_json::to_string(&model_definition).unwrap())
         .expect("Failed to save model definition");
 
     // vertex positions
@@ -160,10 +140,10 @@ fn main() {
     }
 
     // save output image
-    output_image.save("output.png")
+    output_image.save(&output_texture_file)
         .expect("Failed to save output image");
 
-    println!("\n{} {}", "Done!".bold().green(), "Output saved as output.png and model.json".italic());
+    println!("\n{} {}", "Done!".bold().green(), format!("Output saved as {} and {}", &output_texture_file, &output_model_file));
 }
 
 #[inline]
@@ -198,7 +178,66 @@ fn flatten_vertex(vertex: wavefront::Vertex) -> [u32; 3] {
     ]
 }
 
-fn get_header(image: &mut image::DynamicImage, index: u32, texture_width: u32, output_height: u32) -> [f32; 4] {
+fn generate_model_definition(
+    output_texture_file: &String,
+    output_image: &mut image::DynamicImage,
+    num_triangles: u32,
+    texture_width: u32,
+    output_height: u32,
+) -> serde_json::Value {
+    // convert output texture path to model definition format
+    // if the format is not recognized, use the file name as is
+    let texture_path = output_texture_file.strip_prefix("src/assets/")
+        .and_then(|p| p.strip_suffix(".png"))
+        .and_then(|p| {
+            let mut parts = p.splitn(3, '/');
+            let namespace = parts.next()?;
+            let folder = parts.next()?;
+            let rest = parts.next()?;
+
+            if folder != "textures" {
+                return None;
+            }
+
+            Some(format!("{namespace}:{rest}"))
+        })
+        .unwrap_or(output_texture_file.clone());
+
+    // base model definition
+    let mut model_definition = serde_json::json!({
+        "textures": {"0": texture_path},
+        "elements": [],
+        "display": {
+            "thirdperson_righthand": {"rotation": [85, 0, 0]},
+            "thirdperson_lefthand": {"rotation": [85, 0, 0]},
+        }
+    });
+
+    let elements = model_definition
+        .as_object_mut().unwrap()
+        .get_mut("elements").unwrap()
+        .as_array_mut().unwrap();
+
+    // for each triangle, add an element to the model definition with the corresponding UV coordinates
+    for i in 0..num_triangles {
+        elements.push(serde_json::json!({
+            "from": [8, 0, 8],
+            "to": [24, 16, 8],
+            "faces": {
+                "north": {
+                    // get uv coordinates for this triangle from the output image (used for calculating the top-left)
+                    "uv": get_uv_offset(output_image, i, texture_width, output_height),
+                    "texture": "#0",
+                    "tintindex": 0,
+                }
+            },
+        }));
+    }
+
+    model_definition
+}
+
+fn get_uv_offset(image: &mut image::DynamicImage, index: u32, texture_width: u32, output_height: u32) -> [f32; 4] {
     let x = index % texture_width;
     let y = 1 + index / texture_width;
 
