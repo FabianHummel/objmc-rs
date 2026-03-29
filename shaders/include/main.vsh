@@ -30,14 +30,14 @@ void main()
         ivec2 texSize = ivec2(t[1].r << 8 + t[1].g, t[1].b << 8 + t[1].a);
 
         // data heights
-        int uvh = t[2].r << 8 + t[2].g; // UV offsets (for calculating the topleft)
-        int vch = t[2].b << 8 + t[2].a; // vertex indices
-        int vph = t[3].r << 8 + t[3].g; // vertex positions
-        int vth = t[3].b << 8 + t[3].a; // vertex UVs
+        int uvh = (t[2].r << 8) + t[2].g; // UV offsets (for calculating the topleft)
+        int vch = (t[2].b << 8) + t[2].a; // vertex indices
+        int vph = (t[3].r << 8) + t[3].g; // vertex positions
+        int vth = (t[3].b << 8) + t[3].a; // vertex UVs
 
         //relative vertex id from unique face UV
-        int corner = gl_VertexID % 4;
-        int id = ((uvOffset.y - 1) * texSize.x + uvOffset.x) * 4 + corner;
+        int corner = gl_VertexID % 3;
+        int id = ((uvOffset.y - 1) * texSize.x + uvOffset.x) * 3 + corner;
 
         //read data
         int y = 1 + uvh + texSize.y;
