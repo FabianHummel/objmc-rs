@@ -122,7 +122,6 @@ fn main() {
     y_offset += vc_height;
 
     // vertex positions
-
     for (i, &value) in obj.positions().iter().flatten().enumerate() {
         let encoded = 8388608.0 + value * 65536.0;
         write_float(&mut output_image, i as u32, y_offset, texture_width, encoded);
@@ -130,8 +129,8 @@ fn main() {
     y_offset += vp_height;
 
     // uv coordinates
-    for (i, &value) in obj.uvs().iter().flatten().enumerate() {
-        let encoded = value * 65536.0;
+    for (i, &value) in obj.uvs().iter().map(|uv| uv.iter().take(2)).flatten().enumerate() {
+        let encoded = value * 65535.0;
         write_float(&mut output_image, i as u32, y_offset, texture_width, encoded);
     }
     y_offset += vt_height;
