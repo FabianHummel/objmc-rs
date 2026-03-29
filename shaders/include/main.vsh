@@ -1,11 +1,12 @@
 vec3 posOffset = vec3(0);
-vec3 vertexNormal = Normal;
 
 #if 0
 void main()
 #endif
 {
     isObjmcModel = 0;
+    vertexNormal = Normal;
+
     ivec2 uv = ivec2(UV0 * atlasSize);
     ivec4 t[8];
 

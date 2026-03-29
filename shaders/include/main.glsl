@@ -2,6 +2,7 @@
 
 flat out int isObjmcModel;
 flat out ivec4 objmcMarker;
+out vec3 vertexNormal;
 
 bool is_objmc_marker() {
     return objmcMarker.rgb == ivec3(12, 34, 56);
@@ -52,5 +53,6 @@ vec2 get_vec2(ivec2 topLeft, int w, int h, int i) {
 
 flat in int isObjmcModel;
 flat in ivec4 objmcMarker;
+in vec3 vertexNormal;
 
 #endif
