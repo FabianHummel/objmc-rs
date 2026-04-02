@@ -1,47 +1,58 @@
+use argh::FromArgs;
 use colored::Colorize;
 use image::GenericImage;
 use wavefront::Obj;
 
+#[derive(FromArgs)]
+/// A tool to convert .obj files into a format that can be used in Minecraft resource packs.
+struct Args {
+    /// path to the .obj file
+    #[argh(option)]
+    obj: String,
+
+    /// path to the texture file
+    #[argh(option)]
+    texture: Option<String>,
+
+    /// marker value (0-255) to identify the output texture, can be used in the shader to apply special effects
+    #[argh(option)]
+    marker: u8,
+
+    /// path to save the output texture file (default: output.png)
+    #[argh(option, default = "\"output.png\".to_string()")]
+    output_texture: String,
+
+    /// path to save the output model definition file (default: model.json)
+    #[argh(option, default = "\"model.json\".to_string()")]
+    output_model: String,
+}
+
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
-
-    // extract arguments
-    let obj_file = args.get(1)
-        .expect("Please provide the path to the .obj file");
-
-    let texture_file = args.get(2)
-        .expect("Please provide the path to the texture file");
-
-    let marker_value = args.get(3)
-        .expect("Please provide the marker value (0-255)")
-        .parse::<u8>()
-        .expect("Marker value must be an integer between 0 and 255");
-
-    let output_texture_file = args.get(4)
-        .cloned()
-        .unwrap_or("output.png".to_string());
-
-    let output_model_file = args.get(5)
-        .cloned()
-        .unwrap_or("model.json".to_string());
+    // parse command line arguments
+    let args: Args = argh::from_env();
+    let obj_file = args.obj;
+    let texture_file = args.texture;
+    let marker_value = args.marker;
+    let output_texture_file = args.output_texture;
+    let output_model_file = args.output_model;
 
     // read .obj file
     println!("{}", "Loading .obj file...".bold());
-    let obj = Obj::from_file(obj_file)
-        .expect("Failed to load .obj file");
+    let obj = Obj::from_file(obj_file).expect("Failed to load .obj file");
 
     // read texture file
-    println!("{}", "Reading texture file...".bold());
-    let texture = image::open(texture_file)
-        .expect("Failed to load texture file");
+    let texture = texture_file.and_then(|texture_file| {
+        println!("{}", "Reading texture file...".bold());
+        Some(image::open(texture_file).expect("Failed to load texture file"))
+    });
 
-    let texture_width = texture.width();
-    let texture_height = texture.height();
+    let default_width = (obj.vertices().len() as u32 * 3).isqrt();
+    let texture_width = texture.as_ref().map_or(default_width, |texture| texture.width());
+    let texture_height = texture.as_ref().map_or(0, |texture| texture.height());
 
     println!("{}", "Model information:".bold());
 
     // calculate output image dimensions
-
     let num_triangles = obj.triangles().count() as u32;
     let uv_height = num_triangles.div_ceil(texture_width);
     println!(" ・ # faces: {}", num_triangles.to_string().cyan().bold());
@@ -98,8 +109,10 @@ fn main() {
         (vt_height & 0xFF) as u8]));
 
     // texture
-    output_image.copy_from(&texture, 0, 1 + uv_height)
-        .expect("Failed to copy texture to output image");
+    if let Some(texture) = &texture {
+        output_image.copy_from(texture, 0, 1 + uv_height)
+            .expect("Failed to copy texture to output image");
+    }
 
     // generate json model definition
     let model_definition = generate_model_definition(
