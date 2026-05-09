@@ -36,9 +36,24 @@ fn main() {
     let output_texture_file = args.output_texture;
     let output_model_file = args.output_model;
 
-    // read .obj file
-    println!("{}", "Loading .obj file...".bold());
-    let obj = Obj::from_file(obj_file).expect("Failed to load .obj file");
+    let meta = std::fs::metadata(&obj_file);
+    let mut obj_paths = match meta {
+        Ok(meta) if meta.is_file() => vec![obj_file],
+        Ok(meta) if meta.is_dir() => std::fs::read_dir(obj_file)
+            .expect("Failed to read directory")
+            .map(|entry| entry.unwrap().path().to_str().unwrap().to_string())
+            .collect(),
+        _ => panic!("Invalid .obj file or directory"),
+    };
+
+    obj_paths.sort();
+
+    let objs = obj_paths.into_iter().map(|path| {
+        println!("Loading {}...", path.bold());
+        Obj::from_file(path).expect("Failed to load .obj file")
+    }).collect::<Vec<_>>();
+
+    let obj = objs.first().expect("No .obj files found");
 
     // read texture file
     let texture = texture_file.and_then(|texture_file| {
@@ -52,7 +67,9 @@ fn main() {
 
     println!("{}", "Model information:".bold());
 
-    // calculate output image dimensions
+    let num_frames = objs.len() as u32;
+    println!(" ・ # frames: {}", num_frames.to_string().cyan().bold());
+
     let num_triangles = obj.triangles().count() as u32;
     let uv_height = num_triangles.div_ceil(texture_width);
     println!(" ・ # faces: {}", num_triangles.to_string().cyan().bold());
@@ -62,7 +79,7 @@ fn main() {
     println!(" ・ # vertex indices: {}", num_vertices.to_string().cyan().bold());
 
     let num_positions = obj.positions().len() as u32;
-    let vp_height = (num_positions * 3).div_ceil(texture_width);
+    let vp_height = (num_positions * 3 * num_frames).div_ceil(texture_width);
     println!(" ・ # vertices: {}", num_positions.to_string().cyan().bold());
 
     let num_uvs = obj.uvs().len() as u32;
@@ -70,7 +87,7 @@ fn main() {
     println!(" ・ # uv coordinates: {}", num_uvs.to_string().cyan().bold());
 
     let num_normals = obj.normals().len() as u32;
-    let vn_height = (num_normals * 3).div_ceil(texture_width);
+    let vn_height = (num_normals * 3 * num_frames).div_ceil(texture_width);
     println!(" ・ # vertex normals: {}", num_normals.to_string().cyan().bold());
 
     let output_height = 1 + uv_height + texture_height + vc_height + vp_height + vt_height + vn_height;
@@ -108,6 +125,17 @@ fn main() {
         ((vt_height >> 8) & 0xFF) as u8,
         (vt_height & 0xFF) as u8]));
 
+    // data amounts
+    output_image.put_pixel(4, 0, image::Rgba([
+        ((num_positions >> 8) & 0xFF) as u8,
+        (num_positions & 0xFF) as u8,
+        ((num_normals >> 8) & 0xFF) as u8,
+        (num_normals & 0xFF) as u8]));
+    output_image.put_pixel(5, 0, image::Rgba([
+        ((num_frames >> 8) & 0xFF) as u8,
+        (num_frames & 0xFF) as u8,
+        0, 255]));
+
     // texture
     if let Some(texture) = &texture {
         output_image.copy_from(texture, 0, 1 + uv_height)
@@ -135,9 +163,12 @@ fn main() {
     y_offset += vc_height;
 
     // vertex positions
-    for (i, &value) in obj.positions().iter().flatten().enumerate() {
-        let encoded = 8388608.0 + value * 65536.0;
-        write_float(&mut output_image, i as u32, y_offset, texture_width, encoded);
+    for (f, obj) in objs.iter().enumerate() {
+        for (i, &value) in obj.positions().iter().flatten().enumerate() {
+            let index = i as u32 + num_positions * 3 * f as u32;
+            let encoded = 8388608.0 + value * 65536.0;
+            write_float(&mut output_image, index, y_offset, texture_width, encoded);
+        }
     }
     y_offset += vp_height;
 
@@ -149,9 +180,12 @@ fn main() {
     y_offset += vt_height;
 
     // vertex normals
-    for (i, &value) in obj.normals().iter().flatten().enumerate() {
-        let encoded = 8388608.0 + value * 65536.0;
-        write_float(&mut output_image, i as u32, y_offset, texture_width, encoded);
+    for (f, obj) in objs.iter().enumerate() {
+        for (i, &value) in obj.normals().iter().flatten().enumerate() {
+            let index = i as u32 + num_normals * 3 * f as u32;
+            let encoded = 8388608.0 + value * 65536.0;
+            write_float(&mut output_image, index, y_offset, texture_width, encoded);
+        }
     }
 
     // save output image
@@ -235,13 +269,20 @@ fn generate_model_definition(
 
     // for each triangle, add an element to the model definition with the corresponding UV coordinates
     for i in 0..num_triangles {
+        let [x, y] = store_uv_offset(output_image, i, texture_width);
+
         elements.push(serde_json::json!({
             "from": [8, 0, 8],
             "to": [24, 16, 8],
             "faces": {
                 "north": {
-                    // get uv coordinates for this triangle from the output image (used for calculating the top-left)
-                    "uv": get_uv_offset(output_image, i, texture_width, output_height),
+                    // used for calculating the top-left pixel
+                    "uv": [
+                        (x as f32 + 0.1) * 16.0 / texture_width as f32,
+                        (y as f32 + 0.1) * 16.0 / output_height as f32,
+                        (x as f32 + 0.9) * 16.0 / texture_width as f32,
+                        (y as f32 + 0.9) * 16.0 / output_height as f32,
+                    ],
                     "texture": "#0",
                     "tintindex": 0,
                 }
@@ -252,7 +293,7 @@ fn generate_model_definition(
     model_definition
 }
 
-fn get_uv_offset(image: &mut image::DynamicImage, index: u32, texture_width: u32, output_height: u32) -> [f32; 4] {
+fn store_uv_offset(image: &mut image::DynamicImage, index: u32, texture_width: u32) -> [u32; 2] {
     let x = index % texture_width;
     let y = 1 + index / texture_width;
 
@@ -261,10 +302,5 @@ fn get_uv_offset(image: &mut image::DynamicImage, index: u32, texture_width: u32
         (x & 0xFF) as u8,
         ((y >> 8) & 0xFF) as u8,
         (y & 0xFF) as u8]));
-    [
-        (x as f32 + 0.1) * 16.0 / texture_width as f32,
-        (y as f32 + 0.1) * 16.0 / output_height as f32,
-        (x as f32 + 0.9) * 16.0 / texture_width as f32,
-        (y as f32 + 0.9) * 16.0 / output_height as f32,
-    ]
+    [x, y]
 }
