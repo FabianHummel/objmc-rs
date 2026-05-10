@@ -25,6 +25,10 @@ struct Args {
     /// path to save the output model definition file (default: model.json)
     #[argh(option, default = "\"model.json\".to_string()")]
     output_model: String,
+
+    /// namespace reference for the output texture (optional, if not provided, the texture path will be used instead)
+    #[argh(option)]
+    texture_namespace: Option<String>
 }
 
 fn main() {
@@ -144,6 +148,7 @@ fn main() {
 
     // generate json model definition
     let model_definition = generate_model_definition(
+        args.texture_namespace,
         &output_texture_file,
         &mut output_image,
         num_triangles,
@@ -228,29 +233,33 @@ fn flatten_vertex(vertex: wavefront::Vertex) -> [u32; 3] {
 }
 
 fn generate_model_definition(
+    texture_namespace: Option<String>,
     output_texture_file: &String,
     output_image: &mut image::DynamicImage,
     num_triangles: u32,
     texture_width: u32,
     output_height: u32,
 ) -> serde_json::Value {
-    // convert output texture path to model definition format
-    // if the format is not recognized, use the file name as is
-    let texture_path = output_texture_file.strip_prefix("src/assets/")
-        .and_then(|p| p.strip_suffix(".png"))
-        .and_then(|p| {
-            let mut parts = p.splitn(3, '/');
-            let namespace = parts.next()?;
-            let folder = parts.next()?;
-            let rest = parts.next()?;
+    // use the provided texture namespace or convert the output texture
+    // path to model definition format. If the format is not recognized,
+    // use the file name as is.
+    let texture_path = texture_namespace.unwrap_or(
+        output_texture_file.strip_prefix("src/assets/")
+            .and_then(|p| p.strip_suffix(".png"))
+            .and_then(|p| {
+                let mut parts = p.splitn(3, '/');
+                let namespace = parts.next()?;
+                let folder = parts.next()?;
+                let rest = parts.next()?;
 
-            if folder != "textures" {
-                return None;
-            }
+                if folder != "textures" {
+                    return None;
+                }
 
-            Some(format!("{namespace}:{rest}"))
-        })
-        .unwrap_or(output_texture_file.clone());
+                Some(format!("{namespace}:{rest}"))
+            })
+            .unwrap_or(output_texture_file.clone())
+    );
 
     // base model definition
     let mut model_definition = serde_json::json!({
