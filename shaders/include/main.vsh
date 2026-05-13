@@ -61,7 +61,7 @@ void main()
 
         if (numFrames > 1) {
             // next frame
-            index += frameOffset;
+            index = (index + frameOffset) % (frameOffset * numFrames);
             vec3 posOffset2 = get_vec3(topLeft, texSize.x, y + vch, index.x);
             vec3 vertexNormal2 = get_vec3(topLeft, texSize.x, y + vch + vph + vth, index.z);
             posOffset = mix(posOffset, posOffset2, transition);
@@ -71,7 +71,7 @@ void main()
         vec2 onePixel = 1. / atlasSize;
         //final UV (pos set manually)
         texCoord = (vec2(topLeft.x, topLeft.y + 1 + uvh) + texCoord * texSize) / atlasSize
-        //make sure that faces with same UV beginning/ending renders
-        + vec2(onePixel.x * 0.0001 * corner, onePixel.y * 0.0001 * ((corner + 1) % 4));
+                //make sure that faces with same UV beginning/ending renders
+                + vec2(onePixel.x * 0.0001 * corner, onePixel.y * 0.0001 * ((corner + 1) % 4));
     }
 }

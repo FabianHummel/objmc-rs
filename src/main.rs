@@ -6,9 +6,9 @@ use wavefront::Obj;
 #[derive(FromArgs)]
 /// A tool to convert .obj files into a format that can be used in Minecraft resource packs.
 struct Args {
-    /// path to the .obj file
+    /// path to one or more .obj files (multiple will be parsed as an animated sequence)
     #[argh(option)]
-    obj: String,
+    objs: Vec<String>,
 
     /// path to the texture file
     #[argh(option)]
@@ -28,34 +28,25 @@ struct Args {
 
     /// namespace reference for the output texture (optional, if not provided, the texture path will be used instead)
     #[argh(option)]
-    texture_namespace: Option<String>
+    texture_namespace: Option<String>,
 }
 
 fn main() {
     // parse command line arguments
     let args: Args = argh::from_env();
-    let obj_file = args.obj;
+    let obj_files = args.objs;
     let texture_file = args.texture;
     let marker_value = args.marker;
     let output_texture_file = args.output_texture;
     let output_model_file = args.output_model;
 
-    let meta = std::fs::metadata(&obj_file);
-    let mut obj_paths = match meta {
-        Ok(meta) if meta.is_file() => vec![obj_file],
-        Ok(meta) if meta.is_dir() => std::fs::read_dir(obj_file)
-            .expect("Failed to read directory")
-            .map(|entry| entry.unwrap().path().to_str().unwrap().to_string())
-            .collect(),
-        _ => panic!("Invalid .obj file or directory"),
-    };
-
-    obj_paths.sort();
-
-    let objs = obj_paths.into_iter().map(|path| {
-        println!("Loading {}...", path.bold());
-        Obj::from_file(path).expect("Failed to load .obj file")
-    }).collect::<Vec<_>>();
+    let objs = obj_files
+        .into_iter()
+        .map(|path| {
+            println!("Loading {}...", path.bold());
+            Obj::from_file(path).expect("Failed to load .obj file")
+        })
+        .collect::<Vec<_>>();
 
     let obj = objs.first().expect("No .obj files found");
 
@@ -142,7 +133,7 @@ fn main() {
 
     // texture
     if let Some(texture) = &texture {
-        output_image.copy_from(texture, 0, 1 + uv_height)
+        output_image.copy_from(&texture.flipv(), 0, 1 + uv_height)
             .expect("Failed to copy texture to output image");
     }
 
